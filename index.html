@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>IVF Cascade Root-Cause Triage</title>
+
+<!-- PWA / iOS home-screen app ayarları -->
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="IVF Triage">
+<meta name="theme-color" content="#161a1f">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="icon" sizes="192x192" href="icon-192.png">
+<style>
+  /* Standalone modda (ana ekrandan açılınca) çentik/status bar için güvenli alan */
+  @supports (padding: max(0px)) {
+    body{ padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  }
+</style>
+<style>
+  :root{
+    --ink:#161a1f; --muted:#5b6470; --faint:#8a929d;
+    --bg:#f6f7f9; --card:#ffffff; --line:#e3e7ec; --line2:#eef1f4;
+    --bio:#a9791c;   --bio-bg:#fbf3e2;
+    --proc:#0f6b8c;  --proc-bg:#e6f2f6;
+    --stat:#5f6486;  --stat-bg:#ecedf4;
+    --pass:#2b7a56;  --pass-bg:#e7f3ec;
+    --warn:#b4531a;  --warn-bg:#fbeee4;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+       font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:840px;margin:0 auto;padding:20px 16px 72px}
+
+  header{border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:20px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+           text-transform:uppercase;color:var(--proc);margin:0 0 6px}
+  h1{font-size:26px;line-height:1.15;margin:0 0 8px;letter-spacing:-.01em}
+  .lede{color:var(--muted);margin:0;font-size:14px;max-width:60ch}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+        padding:16px;margin:16px 0}
+  .card h2{font-size:13px;font-family:var(--mono);letter-spacing:.08em;
+           text-transform:uppercase;color:var(--muted);margin:0 0 14px;font-weight:600}
+
+  /* input grid */
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  @media(min-width:560px){.grid{grid-template-columns:repeat(3,1fr)}}
+  .fld{display:flex;flex-direction:column;gap:4px}
+  .fld label{font-size:12px;color:var(--muted);font-weight:500}
+  .fld input{font-family:var(--mono);font-size:16px;padding:9px 10px;border:1px solid var(--line);
+             border-radius:8px;background:#fff;color:var(--ink);width:100%}
+  .fld input:focus{outline:2px solid var(--proc);outline-offset:1px;border-color:var(--proc)}
+  .fld input.bad{border-color:var(--warn);background:var(--warn-bg)}
+  .inerr{color:var(--warn);font-size:11px;min-height:12px}
+
+  details.bench{margin-top:4px}
+  details.bench>summary{cursor:pointer;font-family:var(--mono);font-size:12px;
+      color:var(--proc);list-style:none;padding:8px 0}
+  details.bench>summary::-webkit-details-marker{display:none}
+  details.bench>summary::before{content:"▸ ";color:var(--faint)}
+  details.bench[open]>summary::before{content:"▾ "}
+  .brow{display:grid;grid-template-columns:1fr 78px auto;gap:8px;align-items:center;
+        padding:7px 0;border-top:1px solid var(--line2)}
+  .brow label{font-size:13px}
+  .brow input{font-family:var(--mono);width:100%;padding:6px 8px;border:1px solid var(--line);
+              border-radius:6px;text-align:right}
+  .tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;padding:2px 6px;border-radius:10px;
+       white-space:nowrap;text-transform:uppercase}
+  .tag.v{background:var(--pass-bg);color:var(--pass)} .tag.u{background:var(--stat-bg);color:var(--stat)}
+
+  /* verdict banner */
+  .banner{border-radius:12px;padding:16px;margin:16px 0;border:1px solid var(--line)}
+  .banner .k{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 6px}
+  .banner .t{font-size:18px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
+  .banner p{margin:6px 0 0;font-size:13.5px;color:var(--muted)}
+  .banner.sys{background:var(--proc-bg);border-color:#bfdde7}
+  .banner.sys .k,.banner.sys .t{color:var(--proc)}
+  .banner.iso{background:var(--bio-bg);border-color:#ecdcb4}
+  .banner.iso .k,.banner.iso .t{color:var(--bio)}
+  .banner.stat{background:var(--stat-bg);border-color:#d6d9e8}
+  .banner.stat .k,.banner.stat .t{color:var(--stat)}
+  .banner.ok{background:var(--pass-bg);border-color:#c3e3d1}
+  .banner.ok .k,.banner.ok .t{color:var(--pass)}
+
+  /* cascade ladder */
+  .rung{border:1px solid var(--line);border-radius:10px;margin:10px 0;overflow:hidden}
+  .rung>summary{cursor:pointer;list-style:none;padding:12px 14px;display:grid;
+      grid-template-columns:1fr auto;gap:10px;align-items:center}
+  .rung>summary::-webkit-details-marker{display:none}
+  .rung .lhs{min-width:0}
+  .stg{font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .stg .ph{font-family:var(--mono);font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+  .nums{font-family:var(--mono);font-size:12.5px;color:var(--muted);margin-top:3px}
+  .nums b{color:var(--ink)}
+  .chip{font-family:var(--mono);font-size:11px;font-weight:600;padding:5px 9px;border-radius:8px;
+        white-space:nowrap;text-align:center}
+  .chip.A{background:var(--bio-bg);color:var(--bio)}
+  .chip.B{background:var(--proc-bg);color:var(--proc)}
+  .chip.C{background:var(--stat-bg);color:var(--stat)}
+  .chip.P{background:var(--pass-bg);color:var(--pass)}
+  .chip.U{background:#eceff2;color:var(--faint)}
+  .rung .body{padding:0 14px 14px;border-top:1px solid var(--line2);font-size:13.5px}
+  .rung .body .why{color:var(--muted);margin:10px 0}
+  .causes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0}
+  @media(max-width:520px){.causes{grid-template-columns:1fr}}
+  .cbox{border-radius:8px;padding:9px 11px;font-size:12.5px}
+  .cbox.bio{background:var(--bio-bg)} .cbox.proc{background:var(--proc-bg)}
+  .cbox h4{margin:0 0 4px;font-size:10.5px;font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase}
+  .cbox.bio h4{color:var(--bio)} .cbox.proc h4{color:var(--proc)}
+  .cbox ul{margin:0;padding-left:16px} .cbox li{margin:2px 0}
+  .disamb{background:#f3f5f7;border-left:3px solid var(--proc);border-radius:4px;
+          padding:8px 11px;font-size:12.5px;margin-top:6px}
+  .disamb b{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--proc)}
+
+  /* westgard strip */
+  .rules{display:flex;flex-wrap:wrap;gap:7px}
+  .rule{font-family:var(--mono);font-size:11.5px;padding:5px 9px;border-radius:7px;border:1px solid var(--line);color:var(--faint)}
+  .rule.on{color:#fff;border-color:transparent}
+  .rule.on.r3{background:var(--warn)} .rule.on.r2{background:var(--proc)}
+  .rule.on.rt{background:var(--stat)}
+  .rulehint{font-size:12px;color:var(--muted);margin-top:10px}
+
+  footer{margin-top:24px;font-size:12px;color:var(--faint);line-height:1.55}
+  footer h3{font-size:11px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;
+            color:var(--muted);margin:16px 0 6px}
+  footer a{color:var(--proc)}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 4px}
+  .legend .chip{font-size:10.5px}
+  .disc{background:#fff7ed;border:1px solid #f0d8b8;border-radius:8px;padding:10px 12px;
+        font-size:12.5px;color:#7a4a12;margin-top:8px}
+  #resolveCard .rz-intro{font-size:12.5px;color:var(--muted);margin:-4px 0 12px}
+  .rz-global{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+  .rz-global label{font-size:12px;color:var(--muted)}
+  .rz-global input{font-family:var(--mono);font-size:16px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;max-width:130px}
+  .rz-row{display:grid;grid-template-columns:1fr auto auto;gap:8px 14px;align-items:center;padding:10px 0;border-top:1px solid var(--line2)}
+  @media(max-width:560px){.rz-row{grid-template-columns:1fr;gap:6px}}
+  .rz-name{font-weight:600;font-size:14px}
+  .rz-sub{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .rz-sub input[type=number]{font-family:var(--mono);width:58px;padding:5px 7px;border:1px solid var(--line);border-radius:6px}
+  .rz-out{grid-column:1/-1;justify-self:start;font-size:11px}
+  .rz-empty{font-size:12.5px;color:var(--muted);padding:6px 0;line-height:1.5}
+  .rz-summary{margin-top:12px;font-size:12.5px;color:var(--ink);background:#f3f5f7;border-radius:8px;padding:9px 11px}
+  .rz-note{font-size:11.5px;color:var(--faint);margin-top:8px}
+  @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">IVF · KPI · OZEMA · adapted Westgard multirules</p>
+    <h1>Cascade failure root-cause triage</h1>
+    <p class="lede">Enter one cycle's developmental cascade. Each transition is tested against its benchmark
+      (exact binomial), gated for statistical power (minimum-sample gate), and read across the cascade with
+      adapted Westgard rules. Output is a triage hypothesis — <b>A) biological</b>, <b>B) procedural</b>,
+      or <b>C) non-attributable</b> — not a diagnosis.</p>
+  </header>
+
+  <div class="card">
+    <h2>Cycle counts</h2>
+    <div class="grid" id="inputs"></div>
+    <div class="inerr" id="topErr"></div>
+
+    <details class="bench">
+      <summary>Benchmarks &amp; expected rates (edit to your validated lab values)</summary>
+      <div id="benchRows"></div>
+      <div class="disc"><b>Core transitions</b> (maturation / fertilization / cleavage / blastulation) use the
+        <span class="tag v">Vienna competency</span> values 75 / 60 / 95 / 40%, applied via Van&nbsp;Der&nbsp;Kelen&nbsp;et&nbsp;al.&nbsp;2026;
+        cleavage and blastulation both use <b>2PN</b> as denominator (Vienna convention). <b>Extended transitions</b> use the Vienna Consensus (2017):
+        oocyte recovery is a <span class="tag v">Vienna RI</span> (80–95%; reflects stimulation/retrieval, not laboratory culture),
+        implantation uses the Vienna blastocyst-stage <b>competency ≥35%</b> (benchmark ≥60%; multifactorial — uterine receptivity, transfer policy), and the usable-blastocyst rate (usable blastocysts / 2PN) uses a <b>literature-weighted competency of ~40%</b> (Chaillot 2024 and Hammond &amp; Morbeck 2019 converge at ~40&ndash;41%; Datta 2025, n=14,156, reports a broader utilisation rate nadir ~45%) &mdash; <span class="tag u">not a consensus value</span>, so confirm against your own baseline. Minimum-sample gates are OZEMA-derived only for the four core transitions; for the extended transitions they are author-defined. All values are editable to your validated baseline.</div>
+    </details>
+  </div>
+
+  <div id="verdict"></div>
+
+  <div class="card">
+    <h2>Developmental cascade</h2>
+    <div id="ladder"></div>
+  </div>
+
+  <div class="card" id="resolveCard">
+    <h2>Resolve biological vs procedural — concurrent controls + patient history</h2>
+    <p class="rz-intro">The single-cycle verdict above is a weak discriminator. Concurrent sibling-batch controls are the strong one: for each flagged stage, enter how many concurrent cycles (same session / incubator / media lot / operator, different patients) were also low there, and whether the block recurred in this patient. Fixed threshold: a stage is &ldquo;shared&rdquo; when &ge;50% of concurrent cycles are also low.</p>
+    <div class="rz-global">
+      <label for="cc_n">Concurrent cycles under the same conditions (N)</label>
+      <input id="cc_n" type="number" min="0" step="1" inputmode="numeric" value="">
+    </div>
+    <div id="rzRows"></div>
+    <div id="rzSummary" class="rz-summary"></div>
+    <p class="rz-note">2&times;2 logic — shared &amp; not recurrent &rarr; procedural (B); recurrent &amp; not shared &rarr; biological (A); shared &amp; recurrent &rarr; both; neither &rarr; still ambiguous. Needs &ge;2 concurrent cycles.</p>
+  </div>
+
+  <div class="card">
+    <h2>Adapted Westgard multirules (across stages)</h2>
+    <div class="rules" id="rules"></div>
+    <p class="rulehint" id="ruleHint"></p>
+  </div>
+
+  <footer>
+    <div class="legend">
+      <span class="chip A">A · biological</span>
+      <span class="chip B">B · procedural</span>
+      <span class="chip C">C · non-attributable</span>
+      <span class="chip P">pass</span>
+      <span class="chip U">underpowered</span>
+    </div>
+
+    <h3>How attribution is decided</h3>
+    A stage is read only if its denominator meets the OZEMA minimum sample (else → <b>C non-attributable:
+    under-powered</b>). With adequate power, a rate at/above benchmark passes; a rate below benchmark that is
+    <i>not</i> significant on the one-sided exact binomial test (P≥0.05) → <b>C non-attributable: within chance</b>.
+    A significant drop is a real failure: if it is <b>isolated</b> to one stage, biology and that step's technique
+    are co-primary and genuinely ambiguous in a single cycle → the tool shows both and the disambiguating evidence;
+    if flagged stages are <b>contiguous / systemic</b> (Westgard 2₂ₛ / 4₁ₛ pattern), a procedural-environmental
+    cause is prioritised. A single cycle can rarely separate biology from process on its own — concurrent
+    sibling-batch cycles, the patient's cross-cycle history, and QC logs remain the confirmatory step.
+
+    <h3>Adapted Westgard rules</h3>
+    Stage transition ratios are converted to z-scores against benchmark (binomial SD) and read as an ordered
+    series. This is a <b>heuristic adaptation</b> of Westgard multirules to the developmental cascade, not
+    analytical-run QC on a control material; the stages are not independent replicate measurements, so treat
+    fired rules as pattern flags, not formal control violations.
+
+    <h3>Notes &amp; caveats</h3>
+    Benchmarks should be your laboratory's own validated values. Implantation is a clinical, highly multifactorial
+    endpoint (embryo + endometrium + transfer) and is only weakly a lab-process metric; single transfers are
+    statistically uninformative. This tool is a hypothesis-generating triage aid; it does not diagnose a patient
+    or certify a process.
+
+    <h3>Sources</h3>
+    Van&nbsp;Der&nbsp;Kelen&nbsp;A, et&nbsp;al. Defining cut-off values for OZEMA. <i>Hum&nbsp;Reprod</i>
+    2026;41(7):1207–1219. doi:10.1093/humrep/deag072 · ESHRE&nbsp;SIG&nbsp;Embryology &amp; Alpha. The Vienna
+    consensus. <i>Reprod&nbsp;Biomed&nbsp;Online</i> 2017;35(5):494–510. doi:10.1016/j.rbmo.2017.06.015 ·
+    Westgard&nbsp;JO,&nbsp;Barry&nbsp;PL,&nbsp;Hunt&nbsp;MR,&nbsp;Groth&nbsp;T. A multi-rule Shewhart chart for
+    quality control in clinical chemistry. <i>Clin&nbsp;Chem</i> 1981;27(3):493–501.
+    <span style="color:var(--warn)">(classic Westgard multirule reference — please verify the exact citation before formal use.)</span>
+    Gene–phenotype associations are drawn from Van&nbsp;Der&nbsp;Kelen&nbsp;2026; the procedural causes listed are
+    common laboratory culprits, not an exhaustive or validated list.
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+// ---- cascade model -----------------------------------------------------
+// each transition: numerator field / denominator field, benchmark default,
+// OZEMA min sample for adequate power, and cause knowledge.
+const FIELDS = [
+  {k:"foll",  label:"Follicles aspirated"},
+  {k:"coc",   label:"COCs retrieved"},
+  {k:"mii",   label:"MII (mature)"},
+  {k:"pn2",   label:"2PN (fertilised)"},
+  {k:"clv",   label:"Cleaved embryos"},
+  {k:"bl",    label:"Blastocysts"},
+  {k:"use",   label:"Useable embryos"},
+  {k:"tr",    label:"Embryos transferred"},
+  {k:"imp",   label:"Implanted (sacs)"},
+];
+
+const STAGES = [
+  {id:"ret", name:"Retrieval efficiency", ph:"OCR", num:"coc", den:"foll",
+   bench:0.80, src:"Vienna RI 80–95%", min:4, ozemaMin:false,
+   bio:["Low ovarian reserve / poor responder","Genetic empty follicle syndrome (LHCGR)","Premature luteinisation"],
+   proc:["Trigger dose / administration error","Suboptimal aspiration pressure or flushing","Trigger-to-OPU interval too short","Identification / labelling"],
+   dis:"Confirm trigger uptake (serum β-hCG/LH), compare same-day sibling retrievals, review aspiration-pressure log."},
+  {id:"oma", name:"Maturation", ph:"OMA", num:"mii", den:"coc",
+   bench:0.75, src:"Vienna competency", min:3, ozemaMin:true,
+   bio:["Oocyte maturation arrest genes (PATL2, TUBB8, TBPL2, TRIP13)","Cohort immaturity / poor response"],
+   proc:["Trigger timing too early","Denudation timing","Short trigger-to-retrieval interval"],
+   dis:"Check trigger-to-OPU interval and dose, recurrence across the patient's cycles, sibling cycles same session."},
+  {id:"ff", name:"Fertilisation", ph:"FF", num:"pn2", den:"mii",
+   bench:0.60, src:"Vienna competency", min:4, ozemaMin:true,
+   bio:["Oocyte activation deficiency (WEE2)","Sperm factor (PLCζ)","ASTL, CDC20, TUBB8","Gamete quality"],
+   proc:["ICSI technique / failed injection","Sperm preparation","No / wrong assisted oocyte activation","IVF insemination concentration"],
+   dis:"Total vs partial failure? ICSI vs IVF? Sibling oocytes, sperm parameters, whether AOA was used."},
+  {id:"za", name:"Cleavage", ph:"ZA", num:"clv", den:"pn2",
+   bench:0.95, src:"Vienna competency", min:2, ozemaMin:true,
+   bio:["Zygote / first-cleavage arrest (BTG4, CHEK1, RGS12)","Abnormal syngamy"],
+   proc:["Culture temperature / pH excursion","Media lot / composition","Incubator disturbance","Check-timing"],
+   dis:"Compare sibling zygotes, incubator and media lot vs concurrent cycles, patient recurrence."},
+  {id:"eea", name:"Blastulation", ph:"EEA", num:"bl", den:"pn2",
+   bench:0.40, src:"Vienna competency", min:6, ozemaMin:true,
+   bio:["Early embryo arrest genes (MOS, NLRP2/5/7, PADI6, KHDC3L)","Embryonic genome activation failure","Aneuploidy"],
+   proc:["Culture system / media","O₂ tension","Incubator stability","Air quality (VOC)","Extended-culture handling"],
+   dis:"Sibling embryos, incubator/media lot vs concurrent cycles, KPI trend, PGT-A euploidy if available."},
+  {id:"util", name:"Usable-blastocyst rate (TBUR)", ph:"TBUR", num:"use", den:"pn2",
+   bench:0.40, src:"usable blast/2PN 40% (lit-weighted)", min:4, ozemaMin:false,
+   bio:["Poor blastocyst morphology / aneuploidy","Intrinsic cohort / embryo quality"],
+   proc:["Culture system / media","Grading subjectivity","Vitrification survival","Biopsy damage"],
+   dis:"Usable blastocysts / 2PN. Competency 40% is literature-weighted: Chaillot 2024 (n=317; target 40%, poor ≤30%, good ≥50%) and Hammond & Morbeck 2019 (~41%) measure this metric directly and converge at ~40%; Datta 2025 (n=14,156) reports the broader embryo-utilisation rate (transferable embryos/2PN) with a nadir of ~45%, an upper-bound proxy. Low usable-blastocyst rate is associated with lower cumulative live birth rate — review culture system, survival-rate logs and inter-grader concordance."},
+  {id:"imp", name:"Implantation", ph:"CLINICAL", num:"imp", den:"tr",
+   bench:0.35, src:"Vienna competency ≥35% (benchmark ≥60%)", min:4, ozemaMin:false,
+   bio:["Embryo aneuploidy","Endometrial receptivity"],
+   proc:["Transfer technique / catheter","Cryo survival","Endometrial preparation"],
+   dis:"Largely clinical & multifactorial. Euploid status, endometrial factors, transfer difficulty. Single transfers are uninformative."},
+];
+
+// ---- stats -------------------------------------------------------------
+function binomCDF(k,n,p){ // P(X<=k)
+  if(n<=0) return 1;
+  if(p<=0) return 1;
+  if(p>=1) return (k>=n)?1:0;
+  let pmf=Math.pow(1-p,n), cdf=(k>=0)?pmf:0;
+  for(let i=1;i<=k;i++){ pmf*=((n-i+1)/i)*(p/(1-p)); cdf+=pmf; }
+  return Math.min(1,cdf);
+}
+function zscore(ratio,p,n){ if(n<=0) return 0; const sd=Math.sqrt(p*(1-p)/n); return sd>0?(ratio-p)/sd:0; }
+
+// ---- build inputs & benchmarks ----------------------------------------
+const inWrap=document.getElementById("inputs");
+const state={foll:12, coc:10, mii:10, pn2:2, clv:2, bl:1, use:1, tr:1, imp:0};
+FIELDS.forEach(f=>{
+  const d=document.createElement("div"); d.className="fld";
+  d.innerHTML=`<label for="in_${f.k}">${f.label}</label>
+    <input id="in_${f.k}" type="number" min="0" step="1" inputmode="numeric" value="${state[f.k]}">`;
+  inWrap.appendChild(d);
+  d.querySelector("input").addEventListener("input",e=>{
+    state[f.k]=e.target.value===""?null:Math.max(0,parseInt(e.target.value,10)||0); render();
+  });
+});
+
+const benchWrap=document.getElementById("benchRows");
+STAGES.forEach(s=>{
+  const row=document.createElement("div"); row.className="brow";
+  row.innerHTML=`<label>${s.name} <span style="color:var(--faint);font-family:var(--mono);font-size:11px">${s.num}/${s.den}</span></label>
+    <input type="number" min="1" max="100" step="1" placeholder="set" value="${s.bench!=null?Math.round(s.bench*100):''}" id="b_${s.id}">
+    <span class="tag ${s.src.startsWith('Vienna')?'v':'u'}">${s.src}</span>`;
+  benchWrap.appendChild(row);
+  row.querySelector("input").addEventListener("input",e=>{
+    const v=parseFloat(e.target.value); s.bench=(isFinite(v)&&v>0)?Math.min(1,v/100):(e.target.value===''?null:s.bench); render();
+  });
+});
+
+// ---- render ------------------------------------------------------------
+function render(){
+  // validation: numerator <= denominator across the cascade
+  const topErr=document.getElementById("topErr");
+  let msg="";
+  const chk=[["coc","foll"],["mii","coc"],["pn2","mii"],["clv","pn2"],["bl","clv"],["use","bl"],["imp","tr"]];
+  for(const [a,b] of chk){
+    if(state[a]!=null&&state[b]!=null&&state[a]>state[b]){
+      msg=`Check counts: ${a.toUpperCase()} (${state[a]}) cannot exceed ${b.toUpperCase()} (${state[b]}).`; break;
+    }
+  }
+  topErr.textContent=msg;
+
+  const results=STAGES.map(s=>{
+    const n=state[s.den], k=state[s.num];
+    const r={s};
+    if(n==null||k==null||n===0){ r.evaluable=false; return r; }
+    if(s.bench==null){ r.evaluable=false; r.noBench=true; return r; }
+    r.evaluable=true; r.n=n; r.k=k; r.ratio=k/n; r.bench=s.bench;
+    r.power = n>=s.min;
+    r.z = zscore(r.ratio,s.bench,n);
+    r.p = binomCDF(k,n,s.bench);             // one-sided: P(X<=k) under benchmark
+    r.below = r.ratio < s.bench;
+    r.sig = r.below && r.p<0.05;
+    // per-stage class
+    if(!r.power) r.cls="C-under";
+    else if(!r.below) r.cls="P";
+    else if(!r.sig) r.cls="C-chance";
+    else r.cls="SIG";                        // real failure; A/B resolved after cascade pass
+    return r;
+  });
+
+  // cascade context: contiguity of significant flags among evaluable+powered stages
+  const flags=results.map(r=>r.evaluable&&r.cls==="SIG");
+  let maxRun=0,run=0,firstRunIdx=-1;
+  results.forEach((r,i)=>{ if(flags[i]){ if(run===0&&firstRunIdx<0)firstRunIdx=i; run++; maxRun=Math.max(maxRun,run);} else run=0; });
+  const nSig=flags.filter(Boolean).length;
+  const systemic = maxRun>=2;               // contiguous run => procedural-leaning
+
+  // resolve A/B per stage: a significant stage is procedural (B) ONLY if it lies within a
+  // contiguous run of >=2 significant stages; an isolated significant stage stays A/B ambiguous
+  // even when a run exists elsewhere in the cascade.
+  results.forEach((r,i)=>{
+    if(r.cls!=="SIG") return;
+    const prevSig = i>0 && flags[i-1];
+    const nextSig = i<results.length-1 && flags[i+1];
+    r.inRun = prevSig || nextSig;
+    r.primary = r.inRun ? "B" : "AB";
+    r.complete = (r.k===0);
+  });
+  const anyRunB = results.some(r=>r.cls==="SIG" && r.inRun);
+  const anyIso  = results.some(r=>r.cls==="SIG" && !r.inRun);
+
+  // ---- verdict banner
+  const anyUnder = results.some(r=>r.evaluable&&!r.power);
+  const vEl=document.getElementById("verdict");
+  let cls,k1,t,p;
+  if(nSig===0 && !anyUnder){
+    cls="ok";k1="No significant failure";t="Within expected variation";
+    p="Every powered transition sits at or statistically within its benchmark. Nothing here exceeds chance — no root-cause action indicated on these numbers.";
+  } else if(nSig===0 && anyUnder){
+    cls="stat";k1="Non-attributable";t="Underpowered — cannot attribute";
+    p="No transition is significantly below benchmark, but one or more stages fall under the minimum sample, so a true block cannot be distinguished from chance. Interpret with sibling cycles and patient history.";
+  } else if(anyRunB && anyIso){
+    cls="sys";k1="Mixed pattern";t="A procedural run plus an isolated flag";
+    p="Some contiguous stages are depressed together (a procedural signature), while at least one significant stage stands isolated (biological/procedural ambiguous). Treat the run as process-leaning and judge the isolated stage on its own merits — see each stage below.";
+  } else if(anyRunB){
+    cls="sys";k1="Systemic pattern";t="Procedural / environmental root cause prioritised";
+    p="Contiguous stages are significantly depressed (Westgard 2₂ₛ / 4₁ₛ pattern). Shared depression across biologically distinct steps points to the process — media, incubator, air quality, temperature, or technique — before biology. Confirm against concurrent sibling-batch cycles and QC logs.";
+  } else {
+    const iso=results.filter(r=>r.cls==="SIG");
+    cls="iso";k1=iso.length>1?"Isolated blocks":"Localised block";
+    t=iso.length>1?`${iso.length} isolated significant stages (no contiguous run)`:`Isolated failure at ${iso[0]?iso[0].s.name.toLowerCase():"one stage"}`;
+    p="Significant stage(s) with normal neighbours and no contiguous run. Biology and that step's technique are co-primary and cannot be separated within one cycle; see each stage for both hypotheses and the disambiguating evidence.";
+  }
+  vEl.className="banner "+cls;
+  vEl.innerHTML=`<p class="k">${k1}</p><p class="t">${t}</p><p>${p}</p>`;
+
+  // ---- ladder
+  const lad=document.getElementById("ladder"); lad.innerHTML="";
+  results.forEach(r=>{
+    const s=r.s;
+    const det=document.createElement("details"); det.className="rung"; det.dataset.stage=s.id;
+    let chipCls,chipTxt,why,showCauses=false;
+    if(r.noBench){ chipCls="U";chipTxt="no benchmark"; why="No consensus benchmark for this transition (the Vienna group judged utilization too practice-dependent). Enter your laboratory's validated value in the benchmark panel to evaluate this stage."; }
+    else if(!r.evaluable){ chipCls="U";chipTxt="n/a"; why="Not evaluable — denominator is zero or blank (upstream stage produced nothing, or count missing)."; }
+    else if(r.cls==="C-under"){ chipCls="C";chipTxt="C · under-powered";
+      why=`Denominator ${r.n} is below the ${s.ozemaMin?'OZEMA':'author-defined'} minimum of ${s.min} for this stage. A low rate here cannot be told apart from chance — non-attributable.${s.ozemaMin?'':' (This minimum is author-defined, not OZEMA-derived — OZEMA thresholds cover only the four core transitions.)'}`; }
+    else if(r.cls==="P"){ chipCls="P";chipTxt="pass";
+      why=`Rate ${(r.ratio*100).toFixed(0)}% is at or above the ${(s.bench*100).toFixed(0)}% benchmark. No failure at this transition.`; }
+    else if(r.cls==="C-chance"){ chipCls="C";chipTxt="C · within chance";
+      why=`Rate ${(r.ratio*100).toFixed(0)}% is below the ${(s.bench*100).toFixed(0)}% benchmark, but not significantly so given n=${r.n} (one-sided binomial P=${r.p.toFixed(3)}). Reads as statistical noise, not a real block.`; }
+    else { // SIG
+      showCauses=true;
+      if(r.primary==="B"){ chipCls="B";chipTxt="B · procedural";
+        why=`Significant drop (P=${r.p.toFixed(3)}, z=${r.z.toFixed(1)}) that is part of a contiguous depressed run — the shared, cross-stage pattern points to the process first. Biological contribution still possible; see below.`; }
+      else { chipCls="A";chipTxt="A / B · ambiguous";
+        why=`Significant, isolated drop (P=${r.p.toFixed(3)}, z=${r.z.toFixed(1)}) with normal neighbours${r.complete?` and a complete block (0/${r.n})`:""}. In a single cycle, biology (A) and this step's technique (B) are indistinguishable — both are shown; the disambiguator decides.`; }
+    }
+
+    const nums = r.evaluable
+      ? `<span class="nums"><b>${r.k}/${r.n}</b> = <b>${(r.ratio*100).toFixed(0)}%</b> · expected ${(s.bench*100).toFixed(0)}% · z ${r.z.toFixed(1)} · P ${r.p.toFixed(3)} · min n ${s.min}</span>`
+      : `<span class="nums">${s.num}/${s.den} — no data</span>`;
+
+    det.dataset.scCls=chipCls; det.dataset.scTxt=chipTxt;
+    det.innerHTML=`<summary>
+        <span class="lhs">
+          <span class="stg">${s.name} <span class="ph">${s.ph}</span></span>
+          ${nums}
+        </span>
+        <span class="chip ${chipCls}">${chipTxt}</span>
+      </summary>
+      <div class="body">
+        <p class="why">${why}</p>
+        ${showCauses?`
+        <div class="causes">
+          <div class="cbox bio"><h4>A · biological</h4><ul>${s.bio.map(x=>`<li>${x}</li>`).join("")}</ul></div>
+          <div class="cbox proc"><h4>B · procedural</h4><ul>${s.proc.map(x=>`<li>${x}</li>`).join("")}</ul></div>
+        </div>
+        <div class="disamb"><b>Disambiguate</b><br>${s.dis}</div>`:``}
+      </div>`;
+    lad.appendChild(det);
+  });
+
+  // ---- westgard strip
+  const zs=results.filter(r=>r.evaluable).map(r=>({name:r.s.name,z:r.z}));
+  const any=(f)=>zs.some(f);
+  const consec=(pred,len)=>{ let c=0; for(const x of zs){ if(pred(x)){c++; if(c>=len)return true;} else c=0;} return false; };
+  const R={
+    "1₃ₛ": any(x=>x.z<=-3),
+    "1₂ₛ": any(x=>x.z<=-2),
+    "2₂ₛ": consec(x=>x.z<=-2,2),
+    "4₁ₛ": consec(x=>x.z<=-1,4),
+    "Nₓ low": zs.length>0 && zs.every(x=>x.z<0),
+    "R₄ₛ": (()=>{ for(let i=0;i<zs.length-1;i++){ if(Math.abs(zs[i].z-zs[i+1].z)>=4)return true;} return false;})(),
+  };
+  const rEl=document.getElementById("rules"); rEl.innerHTML="";
+  Object.entries(R).forEach(([name,on])=>{
+    const cls = on ? (name==="1₃ₛ"?"on r3":(name==="Nₓ low"||name==="R₄ₛ"?"on rt":"on r2")) : "";
+    const d=document.createElement("span"); d.className="rule "+cls; d.textContent=name; rEl.appendChild(d);
+  });
+  const fired=Object.entries(R).filter(([,v])=>v).map(([k])=>k);
+  document.getElementById("ruleHint").textContent = fired.length
+    ? `Fired: ${fired.join(", ")}. Systematic rules (2₂ₛ, 4₁ₛ, Nₓ low) lean procedural/environmental; single-point rules (1₃ₛ) mark a severe isolated step; R₄ₛ marks a large step-to-step swing.`
+    : "No rules fired — the cascade reads as common-cause variation across stages.";
+
+  buildResolver(results);
+}
+
+// ===== concurrent + patient-history resolver (2x2, fixed threshold 0.5) =====
+const cc={n:0}; const ccShared={}; const ccRecur={};
+document.getElementById("cc_n").addEventListener("input",e=>{
+  const v=parseInt(e.target.value,10); cc.n=(isNaN(v)?0:Math.max(0,v)); resolveOnly();
+});
+function resolveStage(id){
+  const n=cc.n||0; let sh=ccShared[id]; sh=(sh==null?0:Math.min(sh,n));
+  const rec=!!ccRecur[id];
+  if(n<2) return {code:"U", txt:"add \u22652 concurrent cycles to resolve"};
+  const isShared=(sh/n)>=0.5;
+  if(isShared&&!rec) return {code:"B", txt:`shared by ${sh}/${n} concurrent cycles`};
+  if(!isShared&&rec) return {code:"A", txt:`recurrent in patient, not shared (${sh}/${n})`};
+  if(isShared&&rec)  return {code:"AB",txt:`both \u2014 shared (${sh}/${n}) and recurrent (rare)`};
+  return {code:"AB", txt:`ambiguous \u2014 not shared (${sh}/${n}), not recurrent`};
+}
+function buildResolver(results){
+  const sig=results.filter(r=>r.cls==="SIG");
+  const card=document.getElementById("resolveCard"), rows=document.getElementById("rzRows");
+  card.style.display="";
+  const nEl=document.getElementById("cc_n"); if(document.activeElement!==nEl) nEl.value=cc.n||"";
+  if(sig.length===0){
+    rows.innerHTML='<div class="rz-empty">No stage is significantly flagged in the cascade above \u2014 nothing to resolve yet. When a stage is flagged (a real, statistically significant shortfall) a row appears here for each flagged stage: enter how many concurrent cycles were also low there and whether it recurred in this patient, and the biological-vs-procedural call is made automatically (2\u00d72 logic below).</div>';
+    document.getElementById("rzSummary").textContent="";
+    return;
+  }
+  rows.innerHTML="";
+  sig.forEach(r=>{
+    const id=r.s.id, sh=(ccShared[id]!=null?ccShared[id]:""), rec=!!ccRecur[id];
+    const div=document.createElement("div"); div.className="rz-row";
+    div.innerHTML=`<div class="rz-name">${r.s.name} <span class="ph">${r.s.ph}</span></div>
+      <label class="rz-sub">of N also low here <input class="rz-shared" data-id="${id}" type="number" min="0" value="${sh}"></label>
+      <label class="rz-sub"><input class="rz-recur" data-id="${id}" type="checkbox" ${rec?"checked":""}> recurred in patient</label>
+      <span class="chip rz-out" id="rzout_${id}"></span>`;
+    rows.appendChild(div);
+  });
+  rows.querySelectorAll(".rz-shared").forEach(el=>el.addEventListener("input",e=>{
+    const v=parseInt(e.target.value,10); ccShared[e.target.dataset.id]=(e.target.value===""?null:(isNaN(v)?null:Math.max(0,v))); resolveOnly();
+  }));
+  rows.querySelectorAll(".rz-recur").forEach(el=>el.addEventListener("change",e=>{
+    ccRecur[e.target.dataset.id]=e.target.checked; resolveOnly();
+  }));
+  resolveOnly();
+}
+function resolveOnly(){
+  let a=0,b=0,tot=0;
+  document.querySelectorAll(".rz-out").forEach(chip=>{
+    const id=chip.id.replace("rzout_",""); const res=resolveStage(id); tot++;
+    chip.className="chip rz-out "+(res.code==="A"?"A":res.code==="B"?"B":res.code==="U"?"U":"C");
+    chip.textContent=(res.code==="A"?"A \u00b7 biological":res.code==="B"?"B \u00b7 procedural":res.code==="AB"?"A/B":"\u2014")+" \u2014 "+res.txt;
+    const det=document.querySelector(`.rung[data-stage="${id}"]`); const rc=det?det.querySelector(".chip"):null;
+    if(rc){
+      if(res.code==="A"){ rc.className="chip A"; rc.textContent="A \u00b7 biological (concurrent-resolved)"; a++; }
+      else if(res.code==="B"){ rc.className="chip B"; rc.textContent="B \u00b7 procedural (concurrent-resolved)"; b++; }
+      else if(res.code==="AB"){ rc.className="chip A"; rc.textContent="A/B \u00b7 still ambiguous"; }
+      else { rc.className="chip "+det.dataset.scCls; rc.textContent=det.dataset.scTxt; }
+    }
+  });
+  const sum=document.getElementById("rzSummary");
+  if(cc.n<2){ sum.textContent="Enter \u22652 concurrent cycles (and how many were also low at each flagged stage) to resolve biological vs procedural."; }
+  else { sum.innerHTML=`Resolved by concurrent controls: <b>${b}</b> procedural, <b>${a}</b> biological, of ${tot} flagged stage(s). Concurrent sharing \u2192 procedural; patient recurrence \u2192 biological.`; }
+}
+
+render();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

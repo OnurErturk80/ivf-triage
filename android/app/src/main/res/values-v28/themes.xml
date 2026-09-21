@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Let the page extend into the cutout area; MainActivity pads it back out
+         using the real inset, so nothing is ever hidden behind the notch. -->
+    <style name="Theme.IvfTriage" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ink</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

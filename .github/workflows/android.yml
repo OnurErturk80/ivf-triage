@@ -1,0 +1,88 @@
+name: Android
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-app-integrity:
+    name: Web app integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # index.html was once published with three HTML documents concatenated into
+      # it, which rendered a dead second copy of the whole calculator. These checks
+      # fail the build rather than let that ship again.
+      - name: index.html must be exactly one HTML document
+        run: |
+          for tag in '<!DOCTYPE' '<html' '</html>' '<body>' '</body>'; do
+            count=$(grep -c -- "$tag" index.html || true)
+            echo "$tag -> $count"
+            if [ "$count" -ne 1 ]; then
+              echo "::error file=index.html::expected exactly one '$tag', found $count"
+              exit 1
+            fi
+          done
+
+      - name: No duplicate element ids
+        run: |
+          # Static id attributes only: skip data-id and any value holding a "${...}"
+          # template placeholder, which the page builds its rows with at runtime.
+          dupes=$(grep -oE '(^|[[:space:]])id="[^"$]*"' index.html | tr -d ' ' | sort | uniq -d)
+          if [ -n "$dupes" ]; then
+            echo "::error file=index.html::duplicate ids: $dupes"
+            exit 1
+          fi
+          echo "no duplicate ids"
+
+  android:
+    name: Build APK
+    runs-on: ubuntu-latest
+    needs: web-app-integrity
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Assemble debug APK
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Assemble release APK (unsigned)
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease
+
+      # The page is copied into the APK at build time, so prove the copy happened
+      # and that what shipped is byte-for-byte the page in the repository root.
+      - name: Packaged page matches the repository page
+        run: |
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          unzip -p "$apk" assets/index.html > packaged-index.html
+          diff index.html packaged-index.html
+          echo "packaged page is identical to index.html"
+          unzip -l "$apk" | grep -E 'assets/' || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ivf-triage-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ivf-triage-release-apk-unsigned
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

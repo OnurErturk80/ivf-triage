@@ -11,6 +11,14 @@ the page tells the reader that nothing is stored and nothing is transmitted.
 Leaving the permission out makes that enforceable by Android rather than a claim
 in prose — the app cannot open a socket even if a future edit tried to.
 
+The built APK is not literally permission-free, and it is worth being exact about
+why. `androidx.core` adds `<package>.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` to
+the merged manifest: a signature permission declared inside this application's own
+package, which it uses to guard the non-exported broadcast receivers it registers
+at runtime. The app defines it and holds it, so it grants nothing to any other app
+and asks nothing of the user. CI reads the permissions back out of the assembled
+APK and fails if anything outside this package's namespace ever appears.
+
 **The page is served over `https://`, not `file://`.** `WebViewAssetLoader` maps
 the APK's assets onto `https://appassets.androidplatform.net/assets/`, which gives
 the page an ordinary secure origin. Under `file://` a WebView applies a stricter,

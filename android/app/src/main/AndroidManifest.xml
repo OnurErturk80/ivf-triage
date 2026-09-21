@@ -6,6 +6,13 @@
       The calculator is fully self-contained and the page states that nothing is
       stored and nothing is transmitted; withholding the permission makes that
       guarantee enforceable by the operating system rather than a claim in prose.
+
+      The merged manifest is not empty of permissions: androidx.core adds
+      <package>.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION, a signature permission
+      it defines inside this application's own package to guard the non-exported
+      receivers it registers at runtime. The app both defines and holds it, so it
+      grants nothing to or from anything else. CI asserts that nothing outside
+      this package's namespace is ever requested.
     -->
 
     <application

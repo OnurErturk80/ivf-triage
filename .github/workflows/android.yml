@@ -80,20 +80,28 @@ jobs:
           echo "packaged page is identical to index.html"
           unzip -l "$apk" | grep -E 'assets/' || true
 
-      # The app claims to hold no permissions at all, which is the whole reason the
-      # page's "nothing is transmitted" line is enforceable rather than a promise.
-      # Assert it against the built APK instead of trusting the source manifest.
-      - name: APK requests no permissions
+      # The app asks the system for nothing, which is what turns the page's
+      # "nothing is transmitted" line into something Android enforces rather than
+      # a promise. Assert it against the built APK, not the source manifest.
+      - name: APK requests no permission outside its own namespace
         run: |
           apk=android/app/build/outputs/apk/debug/app-debug.apk
           aapt2=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
           echo "using $aapt2"
-          perms=$("$aapt2" dump permissions "$apk" | grep -i 'uses-permission' || true)
-          if [ -n "$perms" ]; then
-            echo "::error::the APK requests permissions: $perms"
+          perms=$("$aapt2" dump permissions "$apk" \
+            | sed -n "s/^uses-permission: name='\([^']*\)'.*/\1/p")
+          echo "declared: ${perms:-<none>}"
+          # androidx.core defines DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION inside the
+          # application's own package to guard the non-exported receivers it registers
+          # at runtime. It is a signature permission the app both defines and holds,
+          # so it grants nothing to or from anywhere else. Anything in another
+          # namespace — android.permission.INTERNET above all — is a real request.
+          external=$(printf '%s\n' "$perms" | grep -v '^io\.github\.onurerturk80\.ivftriage\.' | grep -v '^$' || true)
+          if [ -n "$external" ]; then
+            echo "::error::the APK requests permissions: $external"
             exit 1
           fi
-          echo "no permissions requested"
+          echo "no permission requested outside the app's own namespace"
 
       # sw.js is left out on purpose: in an APK the assets are already local, and a
       # service-worker cache could serve a stale page after an app update.

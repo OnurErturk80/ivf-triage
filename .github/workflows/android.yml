@@ -80,6 +80,32 @@ jobs:
           echo "packaged page is identical to index.html"
           unzip -l "$apk" | grep -E 'assets/' || true
 
+      # The app claims to hold no permissions at all, which is the whole reason the
+      # page's "nothing is transmitted" line is enforceable rather than a promise.
+      # Assert it against the built APK instead of trusting the source manifest.
+      - name: APK requests no permissions
+        run: |
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          aapt2=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          echo "using $aapt2"
+          perms=$("$aapt2" dump permissions "$apk" | grep -i 'uses-permission' || true)
+          if [ -n "$perms" ]; then
+            echo "::error::the APK requests permissions: $perms"
+            exit 1
+          fi
+          echo "no permissions requested"
+
+      # sw.js is left out on purpose: in an APK the assets are already local, and a
+      # service-worker cache could serve a stale page after an app update.
+      - name: sw.js is not packaged
+        run: |
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          if unzip -l "$apk" | grep -q 'assets/sw.js'; then
+            echo "::error::sw.js was packaged into the APK"
+            exit 1
+          fi
+          echo "sw.js correctly absent"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ivf-triage-debug-apk

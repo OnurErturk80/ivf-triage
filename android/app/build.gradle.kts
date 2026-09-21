@@ -57,6 +57,12 @@ android {
 tasks.named("preBuild") { dependsOn(copyWebAssets) }
 
 dependencies {
+    // androidx drags in kotlin-stdlib 1.8.22 next to kotlin-stdlib-jdk7/jdk8 1.6.21.
+    // Kotlin 1.8 folded the jdk7/jdk8 artifacts into kotlin-stdlib itself, so the two
+    // sets of jars carry the same classes and checkDuplicateClasses fails. The BOM
+    // pins all three to one version, where jdk7/jdk8 are empty forwarding artifacts.
+    implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.9.24"))
+
     implementation("androidx.activity:activity:1.9.3")
     implementation("androidx.core:core:1.13.1")
     implementation("androidx.webkit:webkit:1.12.1")

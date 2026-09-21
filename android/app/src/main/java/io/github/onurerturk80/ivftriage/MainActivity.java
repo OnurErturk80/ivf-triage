@@ -19,6 +19,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.WebViewAssetLoader;
@@ -65,7 +66,7 @@ public class MainActivity extends ComponentActivity {
 
         // Light glyphs on the dark chrome, matching the page's theme-color.
         WindowInsetsControllerCompat barAppearance =
-                new WindowInsetsControllerCompat(getWindow(), root);
+                WindowCompat.getInsetsController(getWindow(), root);
         barAppearance.setAppearanceLightStatusBars(false);
         barAppearance.setAppearanceLightNavigationBars(false);
 

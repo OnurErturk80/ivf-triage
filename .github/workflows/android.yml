@@ -53,7 +53,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # packages: '' because the action's default package list still contains the
+      # retired "tools" package, which sdkmanager now fails on. The runner image
+      # already ships the SDK; this step is here to accept the licences.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       - uses: gradle/actions/setup-gradle@v4
 

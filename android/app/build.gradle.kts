@@ -6,11 +6,20 @@ plugins {
 // into the APK's assets at build time so the page never has to be kept in sync by hand.
 val webAssets = layout.buildDirectory.dir("generated/webAssets")
 
+val repoRoot = rootProject.layout.projectDirectory.dir("..")
+
 val copyWebAssets by tasks.registering(Copy::class) {
     description = "Copies the root web app into the APK assets."
-    from(rootProject.layout.projectDirectory.dir("..")) {
-        include("index.html", "manifest.json", "icon-*.png")
-    }
+    // Named one by one rather than filtered out of the root directory: a from(dir)
+    // would make the whole repository an input of this task — including this
+    // module's own build output, which is where the task writes.
+    from(
+        repoRoot.file("index.html"),
+        repoRoot.file("manifest.json"),
+        repoRoot.file("icon-180.png"),
+        repoRoot.file("icon-192.png"),
+        repoRoot.file("icon-512.png"),
+    )
     into(webAssets)
     // sw.js is deliberately NOT bundled: inside the APK the assets are already local,
     // and a service-worker cache would be able to serve a stale page after an app update.
